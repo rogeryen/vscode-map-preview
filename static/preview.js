@@ -42,72 +42,6 @@ function strIsNullOrEmpty(str) {
     return str == null || str == "";
 }
 
-function tryReadCSVFeatures(previewSettings, previewContent, formatOptions, callback) {
-    let aliases = previewSettings.csvColumnAliases;
-    Papa.parse(previewContent, {
-        header: true,
-        complete: function (results) {
-            if (!results.data || results.data.length == 0) {
-                callback({ error: "No data parsed. Probably not a CSV file" });
-            } else {
-                if (results.meta.fields) {
-                    let parsed = null;
-                    //Run through the alias list and see if we get any matches
-                    //for (let alias of aliases) {
-                    aliases.forEach(function (alias) {
-                        if (parsed) {
-                            return;
-                        }
-                        let xc = results.meta.fields.filter(function (s) { return s.toLowerCase() == alias.xColumn.toLowerCase(); })[0];
-                        let yc = results.meta.fields.filter(function (s) { return s.toLowerCase() == alias.yColumn.toLowerCase(); })[0];
-                        // We found the columns, but before we accept this set, the columns
-                        // in question must be numeric. Being CSV and all, we'll use the most
-                        // scientific method to determine this: Sample the first row of data /s
-                        if (!strIsNullOrEmpty(xc) && !strIsNullOrEmpty(yc)) {
-                            let first = results.data[0];
-                            let firstX = parseFloat(first[xc]);
-                            let firstY = parseFloat(first[yc]);
-                            if (first && !isNaN(firstX) && !isNaN(firstY)) {
-                                let json = {
-                                    type: 'FeatureCollection',
-                                    features: []
-                                };
-                                results.data.forEach(function (d) {
-                                    let x = parseFloat(d[xc]);
-                                    let y = parseFloat(d[yc]);
-                                    if (!isNaN(x) && !isNaN(y)) {
-                                        let f = {
-                                            type: 'Feature',
-                                            geometry: {
-                                                coordinates: [x, y],
-                                                type: 'Point'
-                                            },
-                                            properties: d
-                                        }
-                                        delete f.properties[xc];
-                                        delete f.properties[yc];
-                                        json.features.push(f);
-                                    }
-                                });
-                                let fmt = new ol.format.GeoJSON();
-                                parsed = fmt.readFeatures(json, formatOptions);
-                                return;
-                            }
-                        }
-                    });
-                    if (parsed) {
-                        callback({ features: parsed });
-                    } else {
-                        callback({ error: "Data successfully parsed as CSV, but coordinate columns could not be found" });
-                    }
-                } else {
-                    callback({ error: "No fields found in CSV metadata" });
-                }
-            }
-        }
-    })
-}
-
 function tryReadFeatures(format, text, options) {
     try {
         return format.readFeatures(text, options);
@@ -125,51 +59,69 @@ function createPreviewSource(previewContent, formatOptions, previewSettings, cal
         }
         ol.proj.proj4.register(proj4);
     }
-    let formats = {
-        "GPX": ol.format.GPX,
-        "GeoJSON": ol.format.GeoJSON,
-        "IGC": ol.format.IGC,
-        "KML": ol.format.KML,
-        "TopoJSON": ol.format.TopoJSON,
-        "WFS": ol.format.WFS,
-        "GML": ol.format.GML,
-        "GML2": ol.format.GML2,
-        "GML3": ol.format.GML3,
-        "WKT": ol.format.WKT
-    };
-    let features = null;
-    let driverName = null;
-    // CSV has no dedicated OL format driver. It requires a combination of papaparse and feeding
-    // its parsed result (if successful) to the GeoJSON format driver. Thus we will test for this
-    // format first before trying the others one-by-one
-    tryReadCSVFeatures(previewSettings, previewContent, formatOptions, function (res) {
-        features = res.features;
-        if (features && features.length > 0) {
-            driverName = "CSV";
-        } else {
-            for (let formatName in formats) {
-                let format = formats[formatName];
-                let driver = new format();
-                features = tryReadFeatures(driver, previewContent, formatOptions);
-                if (features && features.length > 0) {
-                    driverName = formatName;
-                    break;
-                }
+
+    const driverName = "GeoJSON";
+    const driver = new ol.format.GeoJSON();
+
+    for (const level in previewContent) {
+        if (previewContent[level].level) {
+            const features = tryReadFeatures(driver, previewContent[level].level, formatOptions);
+            if (!features || features.length == 0) {
+                let attemptedFormats = [driverName];
+                throw new Error(`Could not load preview content for level ${level}, feature level. Attempted the following formats:<br/><br/><ul><li>` + attemptedFormats.join("</li><li>") + "</ul></li><p>Please make sure your document content is one of the above formats</p>");
             }
+            previewContent[level].level = new ol.source.Vector({ features: features, wrapX: false });
         }
-        if (!features || features.length == 0) {
-            let attemptedFormats = ["CSV"].concat(Object.keys(formats));
-            throw new Error("Could not load preview content. Attempted the following formats:<br/><br/><ul><li>" + attemptedFormats.join("</li><li>") + "</ul></li><p>Please make sure your document content is one of the above formats</p>");
+
+        if (previewContent[level].building) {
+            const features = tryReadFeatures(driver, previewContent[level].building, formatOptions);
+            if (!features || features.length == 0) {
+                let attemptedFormats = [driverName];
+                throw new Error(`Could not load preview content for level ${level}, feature building. Attempted the following formats:<br/><br/><ul><li>` + attemptedFormats.join("</li><li>") + "</ul></li><p>Please make sure your document content is one of the above formats</p>");
+            }
+            previewContent[level].building = new ol.source.Vector({ features: features, wrapX: false });
         }
-        callback({
-            source: new ol.source.Vector({
-                features: features,
-                //This is needed for features that cross the intl date line to display properly since we aren't fixing our viewport to one
-                //particular view of the world and OL wraps to one earth's flattened viewport.
-                wrapX: false
-            }),
-            driver: driverName
-        });
+
+        if (previewContent[level].space) {
+            const features = tryReadFeatures(driver, previewContent[level].space, formatOptions);
+            if (!features || features.length == 0) {
+                let attemptedFormats = [driverName];
+                throw new Error(`Could not load preview content for level ${level}, feature space. Attempted the following formats:<br/><br/><ul><li>` + attemptedFormats.join("</li><li>") + "</ul></li><p>Please make sure your document content is one of the above formats</p>");
+            }
+            previewContent[level].space = new ol.source.Vector({ features: features, wrapX: false });
+        }
+
+        if (previewContent[level].node) {
+            const features = tryReadFeatures(driver, previewContent[level].node, formatOptions);
+            if (!features || features.length == 0) {
+                let attemptedFormats = [driverName];
+                throw new Error(`Could not load preview content for level ${level}, feature node. Attempted the following formats:<br/><br/><ul><li>` + attemptedFormats.join("</li><li>") + "</ul></li><p>Please make sure your document content is one of the above formats</p>");
+            }
+            previewContent[level].node = new ol.source.Vector({ features: features, wrapX: false });
+        }
+
+        if (previewContent[level].obstruction) {
+            const features = tryReadFeatures(driver, previewContent[level].obstruction, formatOptions);
+            if (!features || features.length == 0) {
+                let attemptedFormats = [driverName];
+                throw new Error(`Could not load preview content for level ${level}, feature obstruction. Attempted the following formats:<br/><br/><ul><li>` + attemptedFormats.join("</li><li>") + "</ul></li><p>Please make sure your document content is one of the above formats</p>");
+            }
+            previewContent[level].obstruction = new ol.source.Vector({ features: features, wrapX: false });
+        }
+
+        if (previewContent[level].connection) {
+            const features = tryReadFeatures(driver, previewContent[level].connection, formatOptions);
+            if (!features || features.length == 0) {
+                let attemptedFormats = [driverName];
+                throw new Error(`Could not load preview content for level ${level}, feature connection. Attempted the following formats:<br/><br/><ul><li>` + attemptedFormats.join("</li><li>") + "</ul></li><p>Please make sure your document content is one of the above formats</p>");
+            }
+            previewContent[level].connection = new ol.source.Vector({ features: features, wrapX: false });
+        }
+    }
+
+    callback({
+        source: previewContent,
+        driver: driverName
     });
 }
 
@@ -342,6 +294,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
             }
         });
     }
+
     let polygonStyle = [new ol.style.Style({
         stroke: new ol.style.Stroke(previewSettings.style.polygon.stroke),
         fill: new ol.style.Fill(previewSettings.style.polygon.fill)
@@ -349,6 +302,18 @@ function initPreviewMap(domElId, preview, previewSettings) {
     if (vertexStyle) {
         polygonStyle.push(vertexStyle);
     }
+    let levelStyle = [new ol.style.Style({
+        stroke: new ol.style.Stroke(previewSettings.style.level.stroke),
+        fill: new ol.style.Fill(previewSettings.style.level.fill)
+    })];
+    let obstructionStyle = [new ol.style.Style({
+        stroke: new ol.style.Stroke(previewSettings.style.obstruction.stroke),
+        fill: new ol.style.Fill(previewSettings.style.obstruction.fill)
+    })];
+    let buildingStyle = [new ol.style.Style({
+        stroke: new ol.style.Stroke(previewSettings.style.building.stroke),
+        fill: new ol.style.Fill(previewSettings.style.building.fill)
+    })];
     let lineStyle = [new ol.style.Style({
         fill: new ol.style.Stroke({
             color: previewSettings.style.line.stroke.color
@@ -361,28 +326,73 @@ function initPreviewMap(domElId, preview, previewSettings) {
     let pointStyle = new ol.style.Style({
         image: pointImage(previewSettings.style.point.stroke.color, previewSettings)
     });
-    let previewLayer = new ol.layer.Vector({
-        source: preview.source,
-        //NOTE: Has no effect for KML, which is fine because it has its own style def that OL
-        //wisely steps aside
-        style: function (feature, resolution) {
-            let geom = feature.getGeometry();
-            if (geom) {
-                let geomType = geom.getType();
-                if (geomType.indexOf("Polygon") >= 0) {
-                    return polygonWithSimpleStyle(polygonStyle, feature, previewSettings);
-                } else if (geomType.indexOf("Line") >= 0) {
-                    return lineWithSimpleStyle(lineStyle, feature, previewSettings);
-                } else if (geomType.indexOf("Point") >= 0) {
-                    return pointWithSimpleStyle(pointStyle, feature, previewSettings);
-                } else { //GeometryCollection
-                    return [pointStyle, lineStyle, polygonStyle];
-                }
-            }
-            return null;
-        },
-        declutter: previewSettings.declutterLabels
+    let connectionStyle = new ol.style.Style({
+        image: pointImage(previewSettings.style.connection.stroke.color, previewSettings)
     });
+
+    let levelGroups = [];
+
+    for (const level in preview.source) {
+        const elevation = preview.source[level].level.getFeatures()[0].getProperties()['elevation'] + '';
+
+        const buildingLayer = new ol.layer.Vector({
+            source: preview.source[level].building,
+            style: function (feature, resolution) {
+                return polygonWithSimpleStyle(buildingStyle, feature, previewSettings);
+            },
+            declutter: previewSettings.declutterLabels,
+        });
+        const levelLayer = new ol.layer.Vector({
+            source: preview.source[level].level,
+            style: function (feature, resolution) {
+                return polygonWithSimpleStyle(levelStyle, feature, previewSettings);
+            },
+            declutter: previewSettings.declutterLabels,
+        });
+        const spaceLayer = new ol.layer.Vector({
+            source: preview.source[level].space,
+            style: function (feature, resolution) {
+                return polygonWithSimpleStyle(polygonStyle, feature, previewSettings);
+            },
+            declutter: previewSettings.declutterLabels,
+        });
+        const obstructionLayer = new ol.layer.Vector({
+            source: preview.source[level].obstruction,
+            style: function (feature, resolution) {
+                return polygonWithSimpleStyle(obstructionStyle, feature, previewSettings);
+            },
+            declutter: previewSettings.declutterLabels,
+        });
+        const nodeLayer = new ol.layer.Vector({
+            source: preview.source[level].node,
+            style: function (feature, resolution) {
+                return pointWithSimpleStyle(pointStyle, feature, previewSettings);
+            },
+            declutter: previewSettings.declutterLabels,
+        });
+        const connectionLayer = new ol.layer.Vector({
+            source: preview.source[level].connection,
+            style: function (feature, resolution) {
+                return pointWithSimpleStyle(connectionStyle, feature, previewSettings);
+            },
+            declutter: previewSettings.declutterLabels,
+        });
+
+        const levelGroup = new ol.layer.Group({
+            title: elevation,
+            layers: [
+                buildingLayer,
+                levelLayer,
+                spaceLayer,
+                obstructionLayer,
+                nodeLayer,
+                connectionLayer
+            ],
+            groupName: level,
+        });
+        levelGroups.push(levelGroup);
+    }
+
     let map = new ol.Map({
         target: 'map',
         controls: ol.control.defaults({
@@ -437,15 +447,13 @@ function initPreviewMap(domElId, preview, previewSettings) {
                 ]
             }),
             new ol.layer.Group({
-                title: "Map Preview",
-                layers: [
-                    previewLayer
-                ]
+                title: "Floors",
+                layers: levelGroups,
             })
         ]
     });
     let mapView = new ol.View();
-    mapView.fit(preview.source.getExtent(), map.getSize());
+    mapView.fit(preview.source[Object.keys(preview.source)[0]].building.getExtent(), map.getSize());
     map.setView(mapView);
     let popup = new Popup();
     map.addOverlay(popup);

@@ -12,7 +12,7 @@ enum SourceType {
 const EPSG_REGEX = /^EPSG:\d+$/g;
 const SCHEME = "map-preview";
 const WEBVIEW_TYPE = "mapPreview";
-const PREVIEW_COMMAND_ID = "map.preview";
+const PREVIEW_COMMAND_ID = "mvf.map.preview";
 const PREVIEW_PROJ_COMMAND_ID = "map.preview-with-proj";
 
 interface IWebViewContext {
@@ -63,7 +63,7 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
 
     private resolveDocument(uri: vscode.Uri): vscode.TextDocument {
         const matches = vscode.window.visibleTextEditors.filter(ed => {
-            return makePreviewUri(ed.document).toString() == uri.toString(); 
+            return makePreviewUri(ed.document).toString() == uri.toString();
         });
         if (matches.length >= 1) { //If we get more than one match, it's probably because the same document has been opened more than once (eg. split view)
             return matches[0].document;
@@ -72,7 +72,19 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
         }
     }
 
-    private generateDocumentContent(uri: vscode.Uri): string {
+    private async parseFeatureChildrenIntoMvf(children, featureName, folder, mvf) {
+        for (const child of children) {
+            const levelId = child.name.split(".")[0];
+            if (!mvf[levelId]) {
+                mvf[levelId] = {};
+            }
+            const mvfUri = vscode.Uri.file(`${folder}/${featureName}/${child.name}`);
+            const levelDoc = await vscode.workspace.openTextDocument(mvfUri);
+            mvf[levelId][featureName] = JSON.parse(this.cleanText(levelDoc.getText()));
+        }
+    }
+
+    private async generateDocumentContent(uri: vscode.Uri): Promise<string> {
         const doc = this.resolveDocument(uri);
         if (doc) {
             let proj = null;
@@ -80,7 +92,49 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
             if (this._projections.has(sUri)) {
                 proj = this._projections.get(sUri);
             }
-            const content = this.createMapPreview(doc, proj);
+
+            const mvf = {};
+            try {
+                const manifest = JSON.parse(this.cleanText(doc.getText()));
+                const folderStruct = manifest.features[0].properties["folder_struct"];
+                const folder = doc.fileName.substring(0, doc.fileName.lastIndexOf("/"));
+                // parse levels first
+                for (const feat of folderStruct) {
+                    if (feat.name === "level") {
+                        await this.parseFeatureChildrenIntoMvf(feat.children, "level", folder, mvf);
+                        break;
+                    }
+                }
+                // parse the rest of the features
+                for (const feat of folderStruct) {
+                    switch (feat.name) {
+                        case "building.geojson":
+                            const mvfUri = vscode.Uri.file(`${folder}/building.geojson`);
+                            const buildingDoc = await vscode.workspace.openTextDocument(mvfUri);
+                            const building = JSON.parse(this.cleanText(buildingDoc.getText()));
+                            for (const levelId in mvf) {
+                                mvf[levelId]["building"] = building;
+                            }
+                            break;
+                        case "space":
+                            await this.parseFeatureChildrenIntoMvf(feat.children, "space", folder, mvf);
+                            break;
+                        case "node":
+                            await this.parseFeatureChildrenIntoMvf(feat.children, "node", folder, mvf);
+                            break;
+                        case "obstruction":
+                            await this.parseFeatureChildrenIntoMvf(feat.children, "obstruction", folder, mvf);
+                            break;
+                        case "connection":
+                            await this.parseFeatureChildrenIntoMvf(feat.children, "connection", folder, mvf);
+                            break;
+                    }
+                }
+            } catch (e) {
+                throw new Error(`Unable to parse manifest: ${e.message}`)
+            }
+
+            const content = this.createMapPreview(doc, mvf, proj);
             const debugSettings = vscode.workspace.getConfiguration("map.preview.debug");
             if (debugSettings.has("dumpContentPath")) {
                 const dumpPath = debugSettings.get<string>("dumpContentPath");
@@ -98,8 +152,8 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
         }
     }
 
-    public provideTextDocumentContent(uri: vscode.Uri): string {
-        const content = this.generateDocumentContent(uri);
+    public async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+        const content = await this.generateDocumentContent(uri);
         return `<!DOCTYPE html>
 <html lang="en">
     <head>
@@ -116,7 +170,7 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
                 style-src-elem 'unsafe-inline' ${this._wctx.getCspSource()};
                 script-src 'nonce-${this._wctx.getScriptNonce()}' ${this._wctx.getCspSource()};" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Map Preview</title>
+        <title>MVF Map Preview</title>
     </head>
     ${content}
 </html>`;
@@ -173,9 +227,10 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
         return text;
     }
 
-    private createMapPreview(doc: vscode.TextDocument, projection: string = null) {
+    private createMapPreview(doc: vscode.TextDocument, mvf, projection: string = null) {
         //Should we languageId check here?
-        const text = this.cleanText(doc.getText());
+        let text = JSON.stringify(JSON.stringify(mvf));
+        text = text.substring(1, text.length - 1);
         const config = vscode.workspace.getConfiguration("map.preview");
         return `<body>
             <div id="map" style="width: 100%; height: 100%">
@@ -205,7 +260,7 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
                     var previewProj = ${projection ? ('"' + projection + '"') : "null"};
                     var previewConfig = ${JSON.stringify(config)};
                     previewConfig.sourceProjection = previewProj;
-                    var content = \`${text}\`;
+                    var content = ${JSON.stringify(mvf)};
                     var formatOptions = { featureProjection: 'EPSG:3857' };
                     if (previewProj != null) {
                         formatOptions.dataProjection = previewProj; 
@@ -222,11 +277,11 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
     }
 }
 
-function loadWebView(content: PreviewDocumentContentProvider, previewUri: vscode.Uri, fileName: string, extensionPath: string) {
+async function loadWebView(content: PreviewDocumentContentProvider, previewUri: vscode.Uri, fileName: string, extensionPath: string) {
     //const column = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined;
     const panel = vscode.window.createWebviewPanel(
-        WEBVIEW_TYPE, 
-        `Map Preview: ${fileName}`,
+        WEBVIEW_TYPE,
+        `MVF Map Preview: ${fileName}`,
         vscode.ViewColumn.Two,
         {
             // Enable scripts in the webview
@@ -246,7 +301,7 @@ function loadWebView(content: PreviewDocumentContentProvider, previewUri: vscode
         getStylesheetNonce: () => cssNonce
     };
     content.attachWebViewContext(wctx);
-    const html =  content.provideTextDocumentContent(previewUri);
+    const html = await content.provideTextDocumentContent(previewUri);
     content.detachWebViewContext();
     panel.webview.html = html;
 }
@@ -264,6 +319,8 @@ interface ProjectionItem extends vscode.QuickPickItem {
     projection: string;
 }
 
+// function parseManifest
+
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -273,45 +330,48 @@ export function activate(context: vscode.ExtensionContext) {
     const previewCommand = vscode.commands.registerCommand(PREVIEW_COMMAND_ID, () => {
         const doc = vscode.window.activeTextEditor.document;
         const docName = path.basename(doc.fileName);
+        // if (docName !== 'manifest.geojson') {
+        //     throw Error('not MVF manifest');
+        // }
         const previewUri = makePreviewUri(doc);
         provider.clearPreviewProjection(previewUri);
         provider.triggerVirtualDocumentChange(previewUri);
         loadWebView(provider, previewUri, docName, extensionPath);
     });
 
-    const previewWithProjCommand = vscode.commands.registerCommand(PREVIEW_PROJ_COMMAND_ID, () => {
-        const opts: vscode.QuickPickOptions = {
-            canPickMany: false,
-            //prompt: "Enter the EPSG code for your projection",
-            placeHolder: "EPSG:XXXX"
-        };
-        const config = vscode.workspace.getConfiguration("map.preview");
-        const codes = [
-            "EPSG:4326",
-            "EPSG:3857",
-            ...config.projections
-                     .filter(prj => prj.epsgCode != 4326 && prj.epsgCode != 3857)
-                     .map(prj => `EPSG:${prj.epsgCode}`)
-        ].map((epsg: string) => ({
-            label: `Preview in projection (${epsg})`,
-            projection: epsg
-        } as ProjectionItem));
-        vscode.window.showQuickPick(codes, opts).then(val => {
-            if (val) {
-                const doc = vscode.window.activeTextEditor.document;
-                const docName = path.basename(doc.fileName);
-                const previewUri = makePreviewUri(doc);
-                provider.setPreviewProjection(previewUri, val.projection);
-                provider.triggerVirtualDocumentChange(previewUri);
-                loadWebView(provider, previewUri, docName, extensionPath);
-            }
-        });
-    });
+    // const previewWithProjCommand = vscode.commands.registerCommand(PREVIEW_PROJ_COMMAND_ID, () => {
+    //     const opts: vscode.QuickPickOptions = {
+    //         canPickMany: false,
+    //         //prompt: "Enter the EPSG code for your projection",
+    //         placeHolder: "EPSG:XXXX"
+    //     };
+    //     const config = vscode.workspace.getConfiguration("map.preview");
+    //     const codes = [
+    //         "EPSG:4326",
+    //         "EPSG:3857",
+    //         ...config.projections
+    //             .filter(prj => prj.epsgCode != 4326 && prj.epsgCode != 3857)
+    //             .map(prj => `EPSG:${prj.epsgCode}`)
+    //     ].map((epsg: string) => ({
+    //         label: `Preview in projection (${epsg})`,
+    //         projection: epsg
+    //     } as ProjectionItem));
+    //     vscode.window.showQuickPick(codes, opts).then(val => {
+    //         if (val) {
+    //             const doc = vscode.window.activeTextEditor.document;
+    //             const docName = path.basename(doc.fileName);
+    //             const previewUri = makePreviewUri(doc);
+    //             provider.setPreviewProjection(previewUri, val.projection);
+    //             provider.triggerVirtualDocumentChange(previewUri);
+    //             loadWebView(provider, previewUri, docName, extensionPath);
+    //         }
+    //     });
+    // });
 
     context.subscriptions.push(previewCommand, registration);
 }
 
 // this method is called when your extension is deactivated
 export function deactivate() {
-    
+
 }
