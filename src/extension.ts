@@ -13,7 +13,7 @@ const EPSG_REGEX = /^EPSG:\d+$/g;
 const SCHEME = "map-preview";
 const WEBVIEW_TYPE = "mapPreview";
 const PREVIEW_COMMAND_ID = "mvf.map.preview";
-const PREVIEW_PROJ_COMMAND_ID = "map.preview-with-proj";
+const PREVIEW_PROJ_COMMAND_ID = "mvf.map.preview-with-proj";
 
 interface IWebViewContext {
     asWebviewUri(src: vscode.Uri): vscode.Uri;
@@ -135,7 +135,7 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
             }
 
             const content = this.createMapPreview(doc, mvf, proj);
-            const debugSettings = vscode.workspace.getConfiguration("map.preview.debug");
+            const debugSettings = vscode.workspace.getConfiguration("mvf.map.preview.debug");
             if (debugSettings.has("dumpContentPath")) {
                 const dumpPath = debugSettings.get<string>("dumpContentPath");
                 if (dumpPath) {
@@ -231,7 +231,7 @@ class PreviewDocumentContentProvider implements vscode.TextDocumentContentProvid
         //Should we languageId check here?
         let text = JSON.stringify(JSON.stringify(mvf));
         text = text.substring(1, text.length - 1);
-        const config = vscode.workspace.getConfiguration("map.preview");
+        const config = vscode.workspace.getConfiguration("mvf.map.preview");
         return `<body>
             <div id="map" style="width: 100%; height: 100%">
                 <div id="format" style="position: absolute; left: 40; top: 5; z-index: 100; padding: 5px; background: yellow; color: black"></div>
@@ -345,7 +345,7 @@ export function activate(context: vscode.ExtensionContext) {
     //         //prompt: "Enter the EPSG code for your projection",
     //         placeHolder: "EPSG:XXXX"
     //     };
-    //     const config = vscode.workspace.getConfiguration("map.preview");
+    //     const config = vscode.workspace.getConfiguration("mvf.map.preview");
     //     const codes = [
     //         "EPSG:4326",
     //         "EPSG:3857",
