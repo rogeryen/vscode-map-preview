@@ -336,6 +336,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
         const elevation = preview.source[level].level.getFeatures()[0].getProperties()['elevation'] + '';
 
         const buildingLayer = new ol.layer.Vector({
+            title: 'building',
             source: preview.source[level].building,
             style: function (feature, resolution) {
                 return polygonWithSimpleStyle(buildingStyle, feature, previewSettings);
@@ -343,6 +344,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
             declutter: previewSettings.declutterLabels,
         });
         const levelLayer = new ol.layer.Vector({
+            title: 'level',
             source: preview.source[level].level,
             style: function (feature, resolution) {
                 return polygonWithSimpleStyle(levelStyle, feature, previewSettings);
@@ -350,6 +352,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
             declutter: previewSettings.declutterLabels,
         });
         const spaceLayer = new ol.layer.Vector({
+            title: 'space',
             source: preview.source[level].space,
             style: function (feature, resolution) {
                 return polygonWithSimpleStyle(polygonStyle, feature, previewSettings);
@@ -357,6 +360,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
             declutter: previewSettings.declutterLabels,
         });
         const obstructionLayer = new ol.layer.Vector({
+            title: 'obstruction',
             source: preview.source[level].obstruction,
             style: function (feature, resolution) {
                 return polygonWithSimpleStyle(obstructionStyle, feature, previewSettings);
@@ -364,6 +368,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
             declutter: previewSettings.declutterLabels,
         });
         const nodeLayer = new ol.layer.Vector({
+            title: 'node',
             source: preview.source[level].node,
             style: function (feature, resolution) {
                 return pointWithSimpleStyle(pointStyle, feature, previewSettings);
@@ -371,6 +376,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
             declutter: previewSettings.declutterLabels,
         });
         const connectionLayer = new ol.layer.Vector({
+            title: 'connection',
             source: preview.source[level].connection,
             style: function (feature, resolution) {
                 return pointWithSimpleStyle(connectionStyle, feature, previewSettings);
@@ -380,6 +386,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
 
         const levelGroup = new ol.layer.Group({
             title: elevation,
+            fold: 'close',
             layers: [
                 buildingLayer,
                 levelLayer,
@@ -388,7 +395,6 @@ function initPreviewMap(domElId, preview, previewSettings) {
                 nodeLayer,
                 connectionLayer
             ],
-            groupName: level,
         });
         levelGroups.push(levelGroup);
     }
