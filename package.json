@@ -52,7 +52,7 @@
                         "stamen-water",
                         "osm"
                     ],
-                    "default": "stamen-toner",
+                    "default": "osm",
                     "description": "The default base layer to use for map previews"
                 },
                 "mvf.map.preview.debug.dumpContentPath": {

@@ -342,6 +342,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
                 return polygonWithSimpleStyle(buildingStyle, feature, previewSettings);
             },
             declutter: previewSettings.declutterLabels,
+            visible: (elevation == '0'),
         });
         const levelLayer = new ol.layer.Vector({
             title: 'level',
@@ -350,6 +351,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
                 return polygonWithSimpleStyle(levelStyle, feature, previewSettings);
             },
             declutter: previewSettings.declutterLabels,
+            visible: (elevation == '0'),
         });
         const spaceLayer = new ol.layer.Vector({
             title: 'space',
@@ -358,6 +360,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
                 return polygonWithSimpleStyle(polygonStyle, feature, previewSettings);
             },
             declutter: previewSettings.declutterLabels,
+            visible: (elevation == '0'),
         });
         const obstructionLayer = new ol.layer.Vector({
             title: 'obstruction',
@@ -366,6 +369,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
                 return polygonWithSimpleStyle(obstructionStyle, feature, previewSettings);
             },
             declutter: previewSettings.declutterLabels,
+            visible: (elevation == '0'),
         });
         const nodeLayer = new ol.layer.Vector({
             title: 'node',
@@ -374,6 +378,7 @@ function initPreviewMap(domElId, preview, previewSettings) {
                 return pointWithSimpleStyle(pointStyle, feature, previewSettings);
             },
             declutter: previewSettings.declutterLabels,
+            visible: (elevation == '0'),
         });
         const connectionLayer = new ol.layer.Vector({
             title: 'connection',
@@ -382,8 +387,9 @@ function initPreviewMap(domElId, preview, previewSettings) {
                 return pointWithSimpleStyle(connectionStyle, feature, previewSettings);
             },
             declutter: previewSettings.declutterLabels,
+            visible: (elevation == '0'),
         });
-
+        console.log(elevation);
         const levelGroup = new ol.layer.Group({
             title: elevation,
             fold: 'close',
@@ -395,7 +401,9 @@ function initPreviewMap(domElId, preview, previewSettings) {
                 nodeLayer,
                 connectionLayer
             ],
+            visible: (elevation == '0'),
         });
+        console.log(levelGroup);
         levelGroups.push(levelGroup);
     }
 
